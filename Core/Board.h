@@ -75,12 +75,20 @@
 #define MODME_RESET			PA5
 #define MODEM_DTR			PA6
 #define MODEM_DCD			PA7
+
 #define AUX_UART			UART_3
 
 #define LED_R_PIN			PB5
 #define LED_G_PIN			PB4
 #define LED_B_PIN			PB3
+#define LED_PORT_COMMON
 
 #define DETECT_I2C			I2C_1
+
+//#define CONSOLE_UART		UART_1
+#define CONSOLE_USB
+#define CONSOLE_TX_BFR		64
+#define CONSOLE_RX_BFR		64
+
 
 #endif /* BOARD_H */
