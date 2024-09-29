@@ -3,6 +3,7 @@
 
 #include "GPIO.h"
 #include "USB.h"
+#include "USB_CDCX.h"
 #include "Console.h"
 #include "LED.h"
 
@@ -109,6 +110,12 @@ int main(void)
 		uint8_t bfr[64];
 		uint32_t read = Console_Read(bfr, sizeof(bfr));
 		SCPI_Parse(&scpi, bfr, read);
+
+		read = USB_CDCX_Read(1, bfr, sizeof(bfr));
+		USB_CDCX_Write(2, bfr, read);
+
+		read = USB_CDCX_Read(2, bfr, sizeof(bfr));
+		USB_CDCX_Write(1, bfr, read);
 
 		CORE_Idle();
 	}

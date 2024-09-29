@@ -8,7 +8,7 @@
 #endif
 #ifdef CONSOLE_USB
 #include "USB.h"
-#include "usb/cdc/USB_CDC.h"
+#include "USB_CDCX.h"
 #endif
 
 /*
@@ -182,7 +182,7 @@ void Console_Write(const uint8_t * bfr, uint32_t size)
 	UART_Write(CONSOLE_UART, bfr, size);
 #endif
 #ifdef CONSOLE_USB
-	USB_CDC_Write(bfr, size);
+	USB_CDCX_Write(CONSOLE_CDC_INDEX, bfr, size);
 #endif
 }
 
@@ -192,7 +192,7 @@ uint32_t Console_Read(uint8_t * bfr, uint32_t size)
 	return UART_Read(CONSOLE_UART, bfr, size);
 #endif
 #ifdef CONSOLE_USB
-	return USB_CDC_Read(bfr, size);
+	return USB_CDCX_Read(CONSOLE_CDC_INDEX, bfr, size);
 #endif
 }
 
