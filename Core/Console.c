@@ -74,8 +74,8 @@ void Console_Prints(const char * str)
 {
 	if (Console_IsEnabled())
 	{
-		Console_Write(str, strlen(str));
-		Console_Write("\r\n", 2);
+		Console_Write((uint8_t*)str, strlen(str));
+		Console_Write((uint8_t*)"\r\n", 2);
 	}
 }
 
@@ -90,7 +90,7 @@ void Console_Printf(const char * fmt, ...)
 		va_end(va);
 		bfr[written++] = '\r';
 		bfr[written++] = '\n';
-		Console_Write(bfr, written);
+		Console_Write((uint8_t*)bfr, written);
 	}
 }
 
@@ -119,7 +119,7 @@ const char * Console_Scans(void)
 		}
 
 		// Read any data into our buffer.
-		gConsole.rx.size += Console_Read(gConsole.rx.bfr + gConsole.rx.size, sizeof(gConsole.rx.bfr) - gConsole.rx.size);
+		gConsole.rx.size += Console_Read((uint8_t*)gConsole.rx.bfr + gConsole.rx.size, sizeof(gConsole.rx.bfr) - gConsole.rx.size);
 
 		if (gConsole.rx.size > search_start)
 		{
@@ -176,23 +176,23 @@ bool Console_IsEnabled(void)
 #endif
 }
 
-void Console_Write(const char * bfr, uint32_t size)
+void Console_Write(const uint8_t * bfr, uint32_t size)
 {
 #ifdef CONSOLE_UART
-	UART_Write(CONSOLE_UART, (uint8_t*)bfr, size);
+	UART_Write(CONSOLE_UART, bfr, size);
 #endif
 #ifdef CONSOLE_USB
-	USB_CDC_Write((uint8_t*)bfr, size);
+	USB_CDC_Write(bfr, size);
 #endif
 }
 
-uint32_t Console_Read(char * bfr, uint32_t size)
+uint32_t Console_Read(uint8_t * bfr, uint32_t size)
 {
 #ifdef CONSOLE_UART
-	return UART_Read(CONSOLE_UART, (uint8_t*)bfr, size);
+	return UART_Read(CONSOLE_UART, bfr, size);
 #endif
 #ifdef CONSOLE_USB
-	return USB_CDC_Read((uint8_t*)bfr, size);
+	return USB_CDC_Read(bfr, size);
 #endif
 }
 

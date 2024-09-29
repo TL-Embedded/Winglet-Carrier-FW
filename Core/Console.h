@@ -34,8 +34,8 @@ uint32_t Console_Scanf(const char * fmt, ...)
 #endif
 
 // Provides raw read/write functions as a common interface to other modules.
-void Console_Write(const char * bfr, uint32_t size);
-uint32_t Console_Read(char * bfr, uint32_t size);
+void Console_Write(const uint8_t * bfr, uint32_t size);
+uint32_t Console_Read(uint8_t * bfr, uint32_t size);
 
 /*
  * EXTERN DECLARATIONS

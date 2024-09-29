@@ -72,9 +72,10 @@
 
 #define MODEM_UART			UART_2
 #define MODEM_WAKE			PA4
-#define MODME_RESET			PA5
+#define MODEM_RESET			PA5
 #define MODEM_DTR			PA6
 #define MODEM_DCD			PA7
+#define MODEM_PWR_EN		PB0
 
 #define AUX_UART			UART_3
 
