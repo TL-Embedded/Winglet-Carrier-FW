@@ -93,14 +93,17 @@ void SCPI_Reply_Printf(SCPI_t * scpi, const char * fmt, ...)
 	char bfr[SCPI_BUFFER_SIZE];
 	va_list va;
 	va_start(va, fmt);
-	uint32_t size = vsnprintf(bfr, sizeof(bfr), fmt, va);
+	uint32_t size = vsnprintf(bfr, sizeof(bfr)-3, fmt, va);
 	va_end(va);
+	bfr[size++] = '\r';
+	bfr[size++] = '\n';
+	bfr[size] = 0;
 	scpi->write((uint8_t*)bfr, size);
 }
 
 void SCPI_Reply_Error(SCPI_t * scpi)
 {
-	scpi->write((const uint8_t*)"ERROR\r\n", 7);
+	SCPI_Reply_Printf(scpi, "ERROR");
 }
 
 void SCPI_Reply_Number(SCPI_t * scpi, int32_t value, uint32_t precision)
@@ -118,19 +121,19 @@ void SCPI_Reply_Number(SCPI_t * scpi, int32_t value, uint32_t precision)
 	int high = value / power;
 	int low = value % power;
 
-	const char * fmt = "-%d.%0*d\r\n";
+	const char * fmt = "-%d.%0*d";
 	if (!negative) { fmt++; }
 	SCPI_Reply_Printf(scpi, fmt, high, precision, low);
 }
 
 void SCPI_Reply_Bool(SCPI_t * scpi, bool value)
 {
-	SCPI_Reply_Printf(scpi, "%s\r\n", value ? "ON" : "OFF");
+	SCPI_Reply_Printf(scpi, value ? "ON" : "OFF");
 }
 
 void SCPI_Reply_Int(SCPI_t * scpi, int32_t value)
 {
-	SCPI_Reply_Printf(scpi, "%d\r\n", value);
+	SCPI_Reply_Printf(scpi, "%d", value);
 }
 
 /*
@@ -179,16 +182,20 @@ static const SCPI_Node_t * SCPI_ParseNode(const SCPI_Node_t * nodes, uint32_t no
 		while (SCPI_MatchName(&ptrn, (const char **)&head))
 		{
 			match_depth += 1;
-			if (*head == ':' && *ptrn == ':')
+			if (*head == ':')
 			{
-				ptrn++;
 				head++;
+				if (*ptrn == ':')
+				{
+					ptrn++;
+					continue;
+				}
 			}
-			else
-			{
-				break;
-			}
+			break;
 		}
+
+		// At least one match needs to have occurred
+		if (!(match_depth > depth)) { continue; }
 
 		if (IS_NAME_END(*head) && IS_NAME_END(*ptrn))
 		{
@@ -253,6 +260,21 @@ static bool SCPI_ParseLine(SCPI_t * scpi, char * str)
 
 static bool SCPI_ParseArgument(SCPI_Arg_t * arg, const char * fmt, char * token)
 {
+	bool optional = *fmt == '?';
+	if (optional) { fmt++; }
+
+	if (token == NULL)
+	{
+		if (optional)
+		{
+			arg->present = false;
+			return true;
+		}
+		return false;
+	}
+
+	arg->present = true;
+
 	switch (*fmt++)
 	{
 	case SCPI_ARG_BOOL:
@@ -283,19 +305,15 @@ static bool SCPI_ParseArguments(SCPI_Arg_t * args, const char * pattern, char **
 			return false;
 		}
 
-		if (format == NULL && token == NULL)
+		if (format == NULL)
 		{
 			if (token != NULL)
 			{
-				// Excess arguments. Error.
-				break;
+				// More arguments than supported.
+				return false;
 			}
-			break; // No more args. We are done.
-		}
-		else if (token == NULL)
-		{
-			// This is where we would handle default arguments.
-			return false;
+			// No more args. We are done.
+			break;
 		}
 
 		if (!SCPI_ParseArgument(args + i, format, token))
@@ -372,7 +390,7 @@ static bool SCPI_MatchName(const char ** name, const char ** str)
 		else if (!IS_ALPHA(*str_head))
 		{
 			// str is too short. Perhaps it is the short form?
-			if (*str_head & ASCII_BIT_LOWER)
+			if (*name_head & ASCII_BIT_LOWER)
 			{
 				// Advance till the end of the name.
 				while (IS_ALPHA(*name_head)) { name_head++; }

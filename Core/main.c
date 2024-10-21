@@ -6,6 +6,7 @@
 #include "USB_CDCX.h"
 #include "Console.h"
 #include "LED.h"
+#include "UART.h"
 
 #include "SCPI.h"
 
@@ -15,6 +16,8 @@ static struct {
 	bool dtr;
 	bool reset;
 	bool wake;
+	bool uart_modem_en;
+	bool uart_aux_en;
 } gIO;
 
 
@@ -25,6 +28,8 @@ bool CMD_RST(SCPI_t * scpi, SCPI_Arg_t * args)
 	GPIO_Write(MODEM_RESET, GPIO_PIN_RESET);
 	GPIO_Write(MODEM_WAKE, GPIO_PIN_RESET);
 	GPIO_Write(MODEM_DTR, GPIO_PIN_RESET);
+	UART_Deinit(MODEM_UART);
+	UART_Deinit(AUX_UART);
 	return true;
 }
 
@@ -74,6 +79,51 @@ bool CMD_IO_Wake(SCPI_t * scpi, SCPI_Arg_t * args)
 	return CMD_PinState(scpi, args, MODEM_WAKE, &gIO.wake);
 }
 
+bool CMD_UARTX(SCPI_t * scpi, SCPI_Arg_t * args, UART_t * uart, bool * state)
+{
+	if (!args)
+	{
+		// Handle query
+		SCPI_Reply_Bool(scpi, *state);
+		return true;
+	}
+
+	bool enable = args[0].boolean;
+
+	if (enable)
+	{
+		if (!args[1].present)
+		{
+			return false;
+		}
+
+		uint32_t baud = args[1].number;
+		if (baud < 1200 || baud > 230400)
+		{
+			return false;
+		}
+
+		UART_Init(uart, baud, UART_Mode_Default);
+		*state = true;
+	}
+	else
+	{
+		UART_Deinit(uart);
+		*state = false;
+	}
+	return true;
+}
+
+bool CMD_UART_Modem(SCPI_t * scpi, SCPI_Arg_t * args)
+{
+	return CMD_UARTX(scpi, args, MODEM_UART, &gIO.uart_modem_en);
+}
+
+bool CMD_UART_Aux(SCPI_t * scpi, SCPI_Arg_t * args)
+{
+	return CMD_UARTX(scpi, args, AUX_UART, &gIO.uart_aux_en);
+}
+
 const SCPI_Node_t cNodes[] = {
 	{ .pattern = "*RST!", .func = CMD_RST },
 	{ .pattern = "*IDN?", .func = CMD_IDN },
@@ -82,9 +132,8 @@ const SCPI_Node_t cNodes[] = {
 	{ .pattern = ":DCD?", .func = CMD_IO_DCD },
 	{ .pattern = ":RESet b", .func = CMD_IO_Reset },
 	{ .pattern = ":WAKE b", .func = CMD_IO_Wake },
-	{ .pattern = "UART:EN b", .func = NULL },
-	{ .pattern = ":SEND! s", .func = NULL },
-	{ .pattern = ":RECEive!", .func = NULL },
+	{ .pattern = "UART:MODem b,?n", .func = CMD_UART_Modem },
+	{ .pattern = ":AUX b,?n", .func = CMD_UART_Aux },
 };
 
 SCPI_t scpi;
@@ -112,10 +161,18 @@ int main(void)
 		SCPI_Parse(&scpi, bfr, read);
 
 		read = USB_CDCX_Read(1, bfr, sizeof(bfr));
-		USB_CDCX_Write(2, bfr, read);
+		if (gIO.uart_modem_en)
+		{
+			UART_Write(MODEM_UART, bfr, read);
+			USB_CDCX_Write(1, bfr, UART_Read(MODEM_UART, bfr, sizeof(bfr)));
+		}
 
 		read = USB_CDCX_Read(2, bfr, sizeof(bfr));
-		USB_CDCX_Write(1, bfr, read);
+		if (gIO.uart_aux_en)
+		{
+			UART_Write(AUX_UART, bfr, read);
+			USB_CDCX_Write(2, bfr, UART_Read(AUX_UART, bfr, sizeof(bfr)));
+		}
 
 		CORE_Idle();
 	}
