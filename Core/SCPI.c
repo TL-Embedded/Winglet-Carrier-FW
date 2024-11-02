@@ -336,10 +336,25 @@ static char * SCPI_GetToken(char ** str, bool terminate)
 		return NULL;
 	}
 
-	// Read out the token.
-	char * token = head;
-	while (!IS_NULL_OR_WHITESPACE(*head) && *head != ',') { head++; }
-	char * end = head;
+	char * token;
+	char * end;
+
+	if (*head == '"')
+	{
+		// Token in in quotes.
+		token = ++head;
+		while (!(*head == 0 || *head == '"')) { head++; }
+		// Check we actually found quotes.
+		if (*head != '"') { return NULL; }
+		end = head++;
+	}
+	else
+	{
+		// Read out the token.
+		token = head;
+		while (!IS_NULL_OR_WHITESPACE(*head) && *head != ',') { head++; }
+		end = head;
+	}
 
 	// Skip more whitespace
 	while (IS_WHITESPACE(*head)) { head++; }

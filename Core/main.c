@@ -7,9 +7,13 @@
 #include "Console.h"
 #include "LED.h"
 #include "UART.h"
+#include "I2C.h"
+#include "M24xx.h"
 
 #include "SCPI.h"
 
+
+#define DETECT_STRING_MAX		32
 
 static struct {
 	bool pwr_en;
@@ -124,6 +128,54 @@ bool CMD_UART_Aux(SCPI_t * scpi, SCPI_Arg_t * args)
 	return CMD_UARTX(scpi, args, AUX_UART, &gIO.uart_aux_en);
 }
 
+bool CMD_PROM_Detect(SCPI_t * scpi, SCPI_Arg_t * args)
+{
+	I2C_Init(DETECT_I2C, I2C_Mode_Fast);
+	bool success = M24xx_Init();
+	SCPI_Reply_Bool(scpi, success);
+	I2C_Deinit(DETECT_I2C);
+	return true;
+}
+
+bool CMD_PROM_Read(SCPI_t * scpi, SCPI_Arg_t * args)
+{
+	bool success = false;
+	I2C_Init(DETECT_I2C, I2C_Mode_Fast);
+
+	uint8_t size;
+	if (M24xx_Init() && M24xx_Read(0, &size, sizeof(size)))
+	{
+		char detect_str[DETECT_STRING_MAX];
+		if (size < DETECT_STRING_MAX && M24xx_Read(1, (uint8_t*)detect_str, size))
+		{
+			success = true;
+			SCPI_Reply_Printf(scpi, "\"%.*s\"", size, detect_str);
+		}
+	}
+
+	I2C_Deinit(DETECT_I2C);
+	return success;
+}
+
+bool CMD_PROM_Write(SCPI_t * scpi, SCPI_Arg_t * args)
+{
+	const char * str = args[0].string;
+	uint8_t len = strlen(str);
+	if (len >= DETECT_STRING_MAX) { return false; }
+
+	bool success = false;
+	I2C_Init(DETECT_I2C, I2C_Mode_Fast);
+
+	uint8_t bfr[DETECT_STRING_MAX + 1];
+	bfr[0] = len;
+	memcpy(bfr+1, str, len);
+
+	success = M24xx_Init() && M24xx_Write(0, bfr, len+1);
+
+	I2C_Deinit(DETECT_I2C);
+	return success;
+}
+
 const SCPI_Node_t cNodes[] = {
 	{ .pattern = "*RST!", .func = CMD_RST },
 	{ .pattern = "*IDN?", .func = CMD_IDN },
@@ -134,9 +186,12 @@ const SCPI_Node_t cNodes[] = {
 	{ .pattern = ":WAKE b", .func = CMD_IO_Wake },
 	{ .pattern = "UART:MODem b,?n", .func = CMD_UART_Modem },
 	{ .pattern = ":AUX b,?n", .func = CMD_UART_Aux },
+	{ .pattern = "PROM?", .func = CMD_PROM_Detect },
+	{ .pattern = ":READ?", .func = CMD_PROM_Read },
+	{ .pattern = ":WRITE! s", .func = CMD_PROM_Write },
 };
 
-SCPI_t scpi;
+static SCPI_t scpi;
 
 
 int main(void)
@@ -158,7 +213,10 @@ int main(void)
 	{
 		uint8_t bfr[64];
 		uint32_t read = Console_Read(bfr, sizeof(bfr));
+
+		LED_Write(LED_Color_Red);
 		SCPI_Parse(&scpi, bfr, read);
+		LED_Write(LED_Color_Green);
 
 		read = USB_CDCX_Read(1, bfr, sizeof(bfr));
 		if (gIO.uart_modem_en)

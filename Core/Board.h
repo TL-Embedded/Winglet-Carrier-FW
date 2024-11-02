@@ -85,6 +85,8 @@
 #define LED_PORT_COMMON
 
 #define DETECT_I2C			I2C_1
+#define M24XX_I2C			DETECT_I2C
+#define M24XX_SERIES		1
 
 //#define CONSOLE_UART		UART_1
 #define CONSOLE_USB
