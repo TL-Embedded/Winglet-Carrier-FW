@@ -63,7 +63,7 @@
 
 // USB config
 #define USB_ENABLE
-#define USB_CLASS_COMPOSITE
+#define USB_CLASS_CDC
 #define USB_CDC_BFR_SIZE		256
 
 // TSC config
@@ -90,7 +90,6 @@
 
 //#define CONSOLE_UART		UART_1
 #define CONSOLE_USB
-#define CONSOLE_CDC_INDEX	0
 #define CONSOLE_TX_BFR		64
 #define CONSOLE_RX_BFR		64
 
