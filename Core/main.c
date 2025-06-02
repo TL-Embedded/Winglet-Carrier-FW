@@ -39,7 +39,7 @@ bool CMD_RST(SCPI_t * scpi, SCPI_Arg_t * args)
 
 bool CMD_IDN(SCPI_t * scpi, SCPI_Arg_t * args)
 {
-	SCPI_Reply_Printf(scpi, "TL-Embedded, Winglet-Carrier, 0, v1.0\r\n");
+	SCPI_Reply_Printf(scpi, "TL-Embedded, Winglet-Carrier, 0, v1.1\r\n");
 	return true;
 }
 
