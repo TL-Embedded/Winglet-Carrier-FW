@@ -4,6 +4,7 @@
 #include "usb/USB_EP.h"
 #include "usb/USB_CTL.h"
 #include "Core.h"
+#include "Logging.h"
 
 /*
  * PRIVATE DEFINITIONS
@@ -280,12 +281,15 @@ static void USB_CDC_Control(uint8_t port, uint8_t cmd, uint8_t* data, uint16_t l
 	switch(cmd)
 	{
 	case CDC_SET_LINE_CODING:
+		Log_Info("cdc%d, set line coding", port);
 		memcpy(cdc->lineCoding, data, sizeof(cdc->lineCoding));
 		break;
 	case CDC_GET_LINE_CODING:
+		Log_Info("cdc%d, get line coding", port);
 		memcpy(data, cdc->lineCoding, sizeof(cdc->lineCoding));
 		break;
 	case CDC_SET_CONTROL_LINE_STATE:
+		Log_Info("cdc%d, set line state", port);
 		cdc->dtr = ((USB_SetupRequest_t*)data)->wValue & 0x0001;
 		break;
 	case CDC_SEND_ENCAPSULATED_COMMAND:
@@ -295,6 +299,7 @@ static void USB_CDC_Control(uint8_t port, uint8_t cmd, uint8_t* data, uint16_t l
 	case CDC_CLEAR_COMM_FEATURE:
 	case CDC_SEND_BREAK:
 	default:
+		Log_Info("cdc%d, unhandled feature: %d", port, cmd);
 		break;
 	}
 }
@@ -302,6 +307,16 @@ static void USB_CDC_Control(uint8_t port, uint8_t cmd, uint8_t* data, uint16_t l
 static void USB_CDC_Receive(uint8_t port, uint32_t count)
 {
 	CDC_t * cdc = gCDC + port;
+
+	if (count == 1)
+	{
+		Log_Info("cdc%d, rx %d byte (0x%02X)", port, count, cdc->rx_packet[0]);
+	}
+	else
+	{
+		Log_Info("cdc%d, rx %d bytes", port, count);
+	}
+
 	if (cdc->dtr)
 	{
 		// Minus 1 because head == tail represents the empty condition.

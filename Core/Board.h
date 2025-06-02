@@ -88,11 +88,12 @@
 #define M24XX_I2C			DETECT_I2C
 #define M24XX_SERIES		1
 
-//#define CONSOLE_UART		UART_1
-#define CONSOLE_USB
-#define CONSOLE_CDC_INDEX	0
-#define CONSOLE_TX_BFR		64
-#define CONSOLE_RX_BFR		64
+#define CONSOLE_UART		UART_1
+//#define CONSOLE_USB
+//#define CONSOLE_CDC_INDEX	0
+#define CONSOLE_TX_BFR		256
+#define CONSOLE_RX_BFR		256
 
+#define LOG_PRINT_TIMESTAMP
 
 #endif /* BOARD_H */

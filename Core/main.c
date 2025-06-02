@@ -11,6 +11,7 @@
 #include "M24xx.h"
 
 #include "SCPI.h"
+#include "Logging.h"
 
 
 #define DETECT_STRING_MAX		32
@@ -176,6 +177,11 @@ bool CMD_PROM_Write(SCPI_t * scpi, SCPI_Arg_t * args)
 	return success;
 }
 
+static void SCPI_Write(const uint8_t * bfr, uint32_t size)
+{
+	USB_CDCX_Write(0, bfr, size);
+}
+
 const SCPI_Node_t cNodes[] = {
 	{ .pattern = "*RST!", .func = CMD_RST },
 	{ .pattern = "*IDN?", .func = CMD_IDN },
@@ -201,20 +207,22 @@ int main(void)
 	Console_Init();
 	LED_Init();
 
+	Log_Info("Booting...");
+
 	GPIO_EnableOutput(MODEM_PWR_EN, GPIO_PIN_RESET);
 	GPIO_EnableOutput(MODEM_RESET, GPIO_PIN_RESET);
 	GPIO_EnableOutput(MODEM_WAKE, GPIO_PIN_RESET);
 	GPIO_EnableOutput(MODEM_DTR, GPIO_PIN_RESET);
 	GPIO_EnableInput(MODEM_DCD, GPIO_Pull_None);
 
-	SCPI_Init(&scpi, cNodes, LENGTH(cNodes), Console_Write);
+	SCPI_Init(&scpi, cNodes, LENGTH(cNodes), SCPI_Write);
 
 	while(1)
 	{
 		uint8_t bfr[64];
-		uint32_t read = Console_Read(bfr, sizeof(bfr));
 
 		LED_Write(LED_Color_Red);
+		uint32_t read = USB_CDCX_Read(0, bfr, sizeof(bfr));
 		SCPI_Parse(&scpi, bfr, read);
 		LED_Write(LED_Color_Green);
 
