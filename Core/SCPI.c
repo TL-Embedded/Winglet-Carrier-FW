@@ -26,14 +26,19 @@
 static void SCPI_Error(SCPI_t * scpi);
 
 static bool SCPI_ParseLine(SCPI_t * scpi, char * str);
-static const SCPI_Node_t * SCPI_ParseNode(const SCPI_Node_t * nodes, uint32_t node_count, const char ** pattern, char ** str);
+static const SCPI_Node_t * SCPI_ParseNode(const SCPI_Node_t * nodes, uint32_t node_count, const char ** pattern, char ** str, SCPI_Arg_t ** args);
 static bool SCPI_ParseArguments(SCPI_Arg_t * args, const char * name, char ** str);
 static bool SCPI_MatchName(const char ** name, const char ** str);
 static char * SCPI_GetToken(char ** str, bool terminate);
 
 static bool SCPI_DecodeInt(const char * token, int32_t * value);
 static bool SCPI_DecodeBool(const char * token, bool * arg);
-static bool SCPI_DecodeNumber(const char * token, int32_t * value, uint32_t precision);
+static bool SCPI_DecodeNumber(const char * token, int32_t * value, int32_t precision);
+static bool SCPI_DecodeUnit(char * token, int32_t * value, int32_t precision, const char * unit);
+static bool SCPI_DecodeBytes(const char * token, uint8_t * dst, uint32_t * size);
+
+static char SCPI_ToHex(uint8_t n);
+static int32_t SCPI_FromHex(char x);
 
 /*
  * PRIVATE VARIABLES
@@ -136,11 +141,56 @@ void SCPI_Reply_Int(SCPI_t * scpi, int32_t value)
 	SCPI_Reply_Printf(scpi, "%d", value);
 }
 
+void SCPI_Reply_Bytes(SCPI_t * scpi, uint8_t * data, uint32_t size)
+{
+	uint8_t bfr[size * 2 + 3];
+	uint32_t pos = 0;
+
+	for (uint32_t i = 0; i < size; i++)
+	{
+		uint8_t b = *data++;
+		bfr[pos++] = SCPI_ToHex(b >> 4);
+		bfr[pos++] = SCPI_ToHex(b & 0x0F);
+	}
+
+	bfr[pos++] = '\r';
+	bfr[pos++] = '\n';
+	bfr[pos] = 0;
+	scpi->write((uint8_t*)bfr, pos);
+}
+
 /*
  * PRIVATE FUNCTIONS: PARSING & EXECUTION
  */
 
-static const SCPI_Node_t * SCPI_ParseNode(const SCPI_Node_t * nodes, uint32_t node_count, const char ** pattern, char ** str)
+static char SCPI_ToHex(uint8_t n)
+{
+	if (n > 9)
+	{
+		return 'a' - 10 + n;
+	}
+	return '0' + n;
+}
+
+static int32_t SCPI_FromHex(char x)
+{
+	if (x >= '0' && x <= '9')
+	{
+		return x - '0';
+	}
+
+	// Discard case info
+	x &= ~('a' - 'A');
+
+	if (x >= 'A' && x <= 'f')
+	{
+		return x - 'A' + 10;
+	}
+
+	return -1;
+}
+
+static const SCPI_Node_t * SCPI_ParseNode(const SCPI_Node_t * nodes, uint32_t node_count, const char ** pattern, char ** str, SCPI_Arg_t ** args)
 {
 	uint32_t match_depth = 0;
 	char * head = *str;
@@ -182,6 +232,21 @@ static const SCPI_Node_t * SCPI_ParseNode(const SCPI_Node_t * nodes, uint32_t no
 		while (SCPI_MatchName(&ptrn, (const char **)&head))
 		{
 			match_depth += 1;
+
+			if (*ptrn == '#')
+			{
+			    ptrn++;
+			    if (*head >= '0' && *head <= '9')
+			    {
+			        (*args)->present = true;
+    				(*args)->number = strtol(head, &head, 10);
+			    }
+			    (*args)++;
+
+				// If there are trailing characters in the head, then later matches will fail.
+				// This is good.
+			}
+
 			if (*head == ':')
 			{
 				head++;
@@ -210,8 +275,11 @@ static const SCPI_Node_t * SCPI_ParseNode(const SCPI_Node_t * nodes, uint32_t no
 
 static bool SCPI_ParseLine(SCPI_t * scpi, char * str)
 {
+	SCPI_Arg_t args[SCPI_ARGS_MAX] = {0};
+	SCPI_Arg_t * arg_head = args;
+
 	const char * pattern;
-	const SCPI_Node_t * node = SCPI_ParseNode(scpi->nodes, scpi->node_count, &pattern, &str);
+	const SCPI_Node_t * node = SCPI_ParseNode(scpi->nodes, scpi->node_count, &pattern, &str, &arg_head);
 	if (!node || !node->func)
 	{
 		return false;
@@ -230,7 +298,9 @@ static bool SCPI_ParseLine(SCPI_t * scpi, char * str)
 		can_query = false;
 	}
 
-	if (*str == '?')
+	scpi->is_query = *str == '?';
+
+	if (scpi->is_query)
 	{
 		if (can_query)
 		{
@@ -238,7 +308,7 @@ static bool SCPI_ParseLine(SCPI_t * scpi, char * str)
 			if (*str == 0)
 			{
 				// This is a properly formatted query command.
-				return node->func(scpi, NULL);
+				return node->func(scpi, args);
 			}
 		}
 	}
@@ -246,9 +316,7 @@ static bool SCPI_ParseLine(SCPI_t * scpi, char * str)
 	{
 		if (can_run)
 		{
-			SCPI_Arg_t args[SCPI_ARGS_MAX];
-			bzero(args, sizeof(args));
-			if (SCPI_ParseArguments(args, pattern, &str) && *str == 0)
+			if (SCPI_ParseArguments(arg_head, pattern, &str) && *str == 0)
 			{
 				// Argument parsing succeeded, and the line is terminated.
 				return node->func(scpi, args);
@@ -275,17 +343,27 @@ static bool SCPI_ParseArgument(SCPI_Arg_t * arg, const char * fmt, char * token)
 
 	arg->present = true;
 
+	uint32_t precision;
+
 	switch (*fmt++)
 	{
 	case SCPI_ARG_BOOL:
 		return SCPI_DecodeBool(token, &arg->boolean);
 	case SCPI_ARG_NUMBER:
-		return SCPI_DecodeNumber(token, &arg->number, atoi(fmt));
+		precision = strtol(fmt, (char**)&fmt, 10);
+		return SCPI_DecodeNumber(token, &arg->number, precision);
+	case SCPI_ARG_UNIT:
+	    precision = strtol(fmt, (char**)&fmt, 10);
+	    return SCPI_DecodeUnit(token, &arg->number, precision, fmt);
 	case SCPI_ARG_INT:
 		return SCPI_DecodeInt(token, &arg->number);
 	case SCPI_ARG_STRING:
 		arg->string = token;
 		return true;
+	case SCPI_ARG_BYTES:
+		arg->bytes.bfr = (uint8_t*)token;
+		// We use our token as our dst buffer. We just rely on the fact that DecodeBytes produces less bytes than it reads.
+		return SCPI_DecodeBytes(token, (uint8_t*)arg->bytes.bfr, &arg->bytes.size);
 	default:
 		break;
 	}
@@ -389,6 +467,14 @@ static bool SCPI_MatchName(const char ** name, const char ** str)
 	const char * str_head = *str;
 	while (1)
 	{
+		if (*name_head == '#')
+		{
+			// This is complete for now. The outer steps should check for this.
+			*name = name_head;
+			*str = str_head;
+			return true;
+		}
+
 		if (!IS_ALPHA(*name_head))
 		{
 			if (!IS_ALPHA(*str_head))
@@ -459,13 +545,27 @@ static bool SCPI_DecodeBool(const char * token, bool * arg)
 	return false;
 }
 
-static bool SCPI_DecodeNumber(const char * token, int32_t * value, uint32_t precision)
+static int32_t SCPI_BaseShift(int32_t n, int32_t power)
 {
+	while (power > 0) {
+		n *= 10;
+		power--;
+	}
+	while (power < 0) {
+		n /= 10;
+		power++;
+	}
+	return n;
+}
+
+static bool SCPI_DecodeNumber(const char * token, int32_t * value, int32_t precision)
+{
+	// TODO: This doesnt handle overflow
 	uint32_t low = 0;
 	bool negative = *token == '-';
 
 	char * end;
-	uint32_t high = strtol(token, &end, 10);
+	int32_t high = strtol(token, &end, 10);
 
 	if (*end == '.')
 	{
@@ -473,16 +573,8 @@ static bool SCPI_DecodeNumber(const char * token, int32_t * value, uint32_t prec
 		if (*start >= '0' && *start <= '9')
 		{
 			low = strtol(start, &end, 10);
-			uint32_t digits = end - start;
-
-			while (digits < precision) {
-				low *= 10;
-				digits++;
-			}
-			while (digits > precision) {
-				low /= 10;
-				digits--;
-			}
+			int32_t digits = end - start;
+			low = SCPI_BaseShift(low, precision - digits);
 		}
 
 		if (negative)
@@ -493,13 +585,89 @@ static bool SCPI_DecodeNumber(const char * token, int32_t * value, uint32_t prec
 
 	if (*end == 0)
 	{
-		int power = 1;
-		for (uint32_t i = 0; i < precision; i++) { power *= 10; }
-		*value = high * power + low;
+		high = SCPI_BaseShift(high, precision);
+		*value = high + low;
 		return true;
 	}
 
 	return false;
+}
+
+static bool SCPI_DecodeUnit(char * token, int32_t * value, int32_t precision, const char * unit)
+{
+    uint32_t unit_len = 0;
+    while ( IS_ALPHA(unit[unit_len])) { unit_len++; }
+
+    uint32_t token_len = strlen(token);
+    if ( token_len < unit_len + 1 || strncmp( token + token_len - unit_len, unit, unit_len) != 0)
+    {
+        // Unit has not been specified
+        return false;
+    }
+
+    char si_prefix = token[token_len - unit_len - 1];
+    if (si_prefix >= '0' && si_prefix <= '9')
+    {
+        // Number. So no e notation.
+        token[token_len - unit_len] = 0;
+    }
+    else
+    {
+    	int32_t power = 0;
+        switch (si_prefix)
+        {
+        case 'T':
+        	power = 12;
+            break;
+        case 'G':
+        	power = 9;
+            break;
+        case 'M':
+        	power = 6;
+            break;
+        case 'k':
+        	power = 3;
+            break;
+        case 'm':
+        	power = -3;
+            break;
+        case 'u':
+        	power = -6;
+            break;
+        case 'n':
+        	power = -9;
+            break;
+        case 'p':
+        	power = -12;
+            break;
+        default:
+            // Unknown unit specifier
+            return false;
+        }
+        precision += power;
+        token[token_len - unit_len - 1] = 0;
+    }
+    return SCPI_DecodeNumber(token, value, precision);
+}
+
+static bool SCPI_DecodeBytes(const char * token, uint8_t * dst, uint32_t * size)
+{
+	uint32_t read = 0;
+
+	while (*token != 0)
+	{
+		// We rely on the second SCPI_FromHex to gracefully return -1 if its passed a null byte
+		int32_t high = SCPI_FromHex(*token++);
+		int32_t low = SCPI_FromHex(*token++);
+		if (high < 0 || low < 0)
+		{
+			return false;
+		}
+		*dst++ = (high << 4) | low;
+		read++;
+	}
+	*size = read;
+	return true;
 }
 
 /*

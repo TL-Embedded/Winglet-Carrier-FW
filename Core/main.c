@@ -45,15 +45,14 @@ bool CMD_IDN(SCPI_t * scpi, SCPI_Arg_t * args)
 
 bool CMD_PinState(SCPI_t * scpi, SCPI_Arg_t * args, GPIO_Pin_t pin, bool * state)
 {
-	if (args)
-	{
-		*state = args[0].boolean;
-		GPIO_Write(pin, *state);
-	}
-	else
+	if (SCPI_IsQuery(scpi))
 	{
 		SCPI_Reply_Bool(scpi, *state);
+		return true;
 	}
+
+	*state = args[0].boolean;
+	GPIO_Write(pin, *state);
 	return true;
 }
 
@@ -85,9 +84,8 @@ bool CMD_IO_Wake(SCPI_t * scpi, SCPI_Arg_t * args)
 
 bool CMD_UARTX(SCPI_t * scpi, SCPI_Arg_t * args, UART_t * uart, bool * state)
 {
-	if (!args)
+	if (SCPI_IsQuery(scpi))
 	{
-		// Handle query
 		SCPI_Reply_Bool(scpi, *state);
 		return true;
 	}
@@ -176,6 +174,83 @@ bool CMD_PROM_Write(SCPI_t * scpi, SCPI_Arg_t * args)
 	return success;
 }
 
+bool CMD_I2C_Detect(SCPI_t * scpi, SCPI_Arg_t * args)
+{
+	int32_t address = args[0].number;
+	if (address < 0 || address > 0x7F)
+		return false;
+
+	I2C_Init(DETECT_I2C, I2C_Mode_Fast);
+	bool success = I2C_Scan(DETECT_I2C, address);
+	I2C_Deinit(DETECT_I2C);
+	SCPI_Reply_Bool(scpi, success);
+	return true;
+}
+
+bool CMD_I2C_Read(SCPI_t * scpi, SCPI_Arg_t * args)
+{
+	uint8_t rx_bfr[255];
+
+	int32_t address = args[0].number;
+	if (address < 0 || address > 0x7F)
+		return false;
+
+	int32_t rx_count = args[1].number;
+	if (rx_count < 0 || rx_count > sizeof(rx_bfr))
+		return false;
+
+	I2C_Init(DETECT_I2C, I2C_Mode_Fast);
+	bool success = I2C_Read(DETECT_I2C, address, rx_bfr, rx_count);
+	I2C_Deinit(DETECT_I2C);
+
+	if (success)
+		SCPI_Reply_Bytes(scpi, rx_bfr, rx_count);
+	return success;
+}
+
+bool CMD_I2C_Write(SCPI_t * scpi, SCPI_Arg_t * args)
+{
+	int32_t address = args[0].number;
+	if (address < 0 || address > 0x7F)
+		return false;
+
+	int32_t tx_count = args[1].bytes.size;
+	if (tx_count < 0 || tx_count > 255)
+		return false;
+
+	I2C_Init(DETECT_I2C, I2C_Mode_Fast);
+	bool success = I2C_Write(DETECT_I2C, address, args[1].bytes.bfr, tx_count);
+	I2C_Deinit(DETECT_I2C);
+
+	return success;
+}
+
+bool CMD_I2C_Transfer(SCPI_t * scpi, SCPI_Arg_t * args)
+{
+	uint8_t rx_bfr[255];
+
+	int32_t address = args[0].number;
+	if (address < 0 || address > 0x7F)
+		return false;
+
+	int32_t tx_count = args[1].bytes.size;
+	if (tx_count < 0 || tx_count > 255)
+		return false;
+
+	int32_t rx_count = args[2].number;
+	if (rx_count < 0 || rx_count > sizeof(rx_bfr))
+		return false;
+
+	I2C_Init(DETECT_I2C, I2C_Mode_Fast);
+	bool success = I2C_Transfer(DETECT_I2C, address, args[1].bytes.bfr, tx_count, rx_bfr, rx_count);
+	I2C_Deinit(DETECT_I2C);
+
+	if (success)
+		SCPI_Reply_Bytes(scpi, rx_bfr, rx_count);
+
+	return success;
+}
+
 const SCPI_Node_t cNodes[] = {
 	{ .pattern = "*RST!", .func = CMD_RST },
 	{ .pattern = "*IDN?", .func = CMD_IDN },
@@ -189,6 +264,10 @@ const SCPI_Node_t cNodes[] = {
 	{ .pattern = "PROM?", .func = CMD_PROM_Detect },
 	{ .pattern = ":READ?", .func = CMD_PROM_Read },
 	{ .pattern = ":WRITE! s", .func = CMD_PROM_Write },
+	{ .pattern = "IIC:DET! i", .func = CMD_I2C_Detect },
+	{ .pattern = ":READ! i,i", .func = CMD_I2C_Read },
+	{ .pattern = ":WRITE! i,x", .func = CMD_I2C_Write },
+	{ .pattern = ":TRANsfer! i,x,i", .func = CMD_I2C_Transfer },
 };
 
 static SCPI_t scpi;

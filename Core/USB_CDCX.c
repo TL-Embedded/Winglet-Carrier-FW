@@ -67,7 +67,6 @@ typedef struct {
 
 typedef struct {
 	volatile bool txBusy;
-	volatile bool dtr;
 	uint8_t lineCoding[7];
 	CDCBuffer_t rx;
 	uint8_t rx_packet[CDC_PACKET_SIZE];
@@ -123,7 +122,6 @@ void USB_CDCX_Init(uint8_t config)
 		CDC_t * cdc = gCDC + port;
 		cdc->rx.head = cdc->rx.tail = 0;
 		cdc->txBusy = false;
-		cdc->dtr = false;
 		memcpy(cdc->lineCoding, lineCoding, sizeof(cdc->lineCoding));
 	}
 
@@ -159,7 +157,6 @@ void USB_CDCX_Deinit(void)
 		USB_EP_Close(CDC_OUT_EP(port));
 		USB_EP_Close(CDC_CMD_EP(port));
 		cdc->rx.head = cdc->rx.tail = 0;
-		cdc->dtr = false;
 	}
 }
 
@@ -170,14 +167,10 @@ void USB_CDCX_Write(uint8_t port, const uint8_t * data, uint32_t count)
 	CDC_t * cdc = gCDC + port;
 	while (count)
 	{
-		if (!cdc->dtr)
-		{
-			return;
-		}
 		if (cdc->txBusy)
 		{
 			// Wait for transmit to be free. Abort if it does not come free.
-			if (CORE_GetTick() - tide > 10 || !cdc->dtr)
+			if (CORE_GetTick() - tide > 10)
 			{
 				break;
 			}
@@ -286,8 +279,6 @@ static void USB_CDC_Control(uint8_t port, uint8_t cmd, uint8_t* data, uint16_t l
 		memcpy(data, cdc->lineCoding, sizeof(cdc->lineCoding));
 		break;
 	case CDC_SET_CONTROL_LINE_STATE:
-		cdc->dtr = ((USB_SetupRequest_t*)data)->wValue & 0x0001;
-		break;
 	case CDC_SEND_ENCAPSULATED_COMMAND:
 	case CDC_GET_ENCAPSULATED_RESPONSE:
 	case CDC_SET_COMM_FEATURE:
@@ -302,36 +293,32 @@ static void USB_CDC_Control(uint8_t port, uint8_t cmd, uint8_t* data, uint16_t l
 static void USB_CDC_Receive(uint8_t port, uint32_t count)
 {
 	CDC_t * cdc = gCDC + port;
-	if (cdc->dtr)
+	// Minus 1 because head == tail represents the empty condition.
+	uint32_t space = CDC_BFR_WRAP(cdc->rx.tail - cdc->rx.head - 1);
+
+	if (count > space)
 	{
-		// Minus 1 because head == tail represents the empty condition.
-		uint32_t space = CDC_BFR_WRAP(cdc->rx.tail - cdc->rx.head - 1);
-
-		if (count > space)
-		{
-			// Discard any data that we cannot insert into the buffer.
-			count = space;
-		}
-		if (count > 0)
-		{
-			uint32_t head = cdc->rx.head;
-			uint32_t newhead = CDC_BFR_WRAP( head + count );
-			if (newhead > head)
-			{
-				// We can write continuously into the buffer
-				memcpy(cdc->rx.buffer + head, cdc->rx_packet, count);
-			}
-			else
-			{
-				// We write to end of buffer, then write from the start
-				uint32_t chunk = CDC_BFR_SIZE - head;
-				memcpy(cdc->rx.buffer + head, cdc->rx_packet, chunk);
-				memcpy(cdc->rx.buffer, cdc->rx_packet + chunk, count - chunk);
-			}
-			cdc->rx.head = newhead;
-		}
+		// Discard any data that we cannot insert into the buffer.
+		count = space;
 	}
-
+	if (count > 0)
+	{
+		uint32_t head = cdc->rx.head;
+		uint32_t newhead = CDC_BFR_WRAP( head + count );
+		if (newhead > head)
+		{
+			// We can write continuously into the buffer
+			memcpy(cdc->rx.buffer + head, cdc->rx_packet, count);
+		}
+		else
+		{
+			// We write to end of buffer, then write from the start
+			uint32_t chunk = CDC_BFR_SIZE - head;
+			memcpy(cdc->rx.buffer + head, cdc->rx_packet, chunk);
+			memcpy(cdc->rx.buffer, cdc->rx_packet + chunk, count - chunk);
+		}
+		cdc->rx.head = newhead;
+	}
 	USB_EP_Read(CDC_OUT_EP(port), cdc->rx_packet, CDC_PACKET_SIZE);
 }
 

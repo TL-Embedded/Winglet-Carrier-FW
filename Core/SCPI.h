@@ -18,6 +18,8 @@
 #define SCPI_ARG_INT		'i'
 #define SCPI_ARG_NUMBER		'n'
 #define SCPI_ARG_STRING		's'
+#define SCPI_ARG_BYTES		'x'
+#define SCPI_ARG_UNIT       'u'
 
 /*
  * PUBLIC TYPES
@@ -31,12 +33,16 @@ typedef struct {
 		int32_t number;
 		bool boolean;
 		const char * string;
+		struct {
+			uint32_t size;
+			const uint8_t * bfr;
+		} bytes;
 	};
 } SCPI_Arg_t;
 
 typedef struct {
 	const char * pattern;
-	bool (*func)(SCPI_t *, SCPI_Arg_t * args);
+	bool (*func)(SCPI_t * scpi, SCPI_Arg_t * args);
 } SCPI_Node_t;
 
 typedef struct SCPI_s{
@@ -47,6 +53,7 @@ typedef struct SCPI_s{
 		char bfr[SCPI_BUFFER_SIZE];
 		uint32_t size;
 	} rx;
+	bool is_query;
 } SCPI_t;
 
 /*
@@ -62,21 +69,10 @@ void SCPI_Reply_Error(SCPI_t * scpi);
 void SCPI_Reply_Number(SCPI_t * scpi, int32_t value, uint32_t precision);
 void SCPI_Reply_Bool(SCPI_t * scpi, bool value);
 void SCPI_Reply_Int(SCPI_t * scpi, int32_t value);
+void SCPI_Reply_Bytes(SCPI_t * scpi, uint8_t * data, uint32_t size);
 
-/*
- * UTIL DEFINITIONS
- */
+// Utility for within commands
+static inline bool SCPI_IsQuery(SCPI_t * scpi) { return scpi->is_query; }
 
-#define SCPI_NODE_FUNC(_name, _run, _query)	{\
-		.name = _name,\
-		.run = _run,\
-		.query = _query,\
-	}
-
-#define SCPI_NODE_MENU(_name, ...)	{\
-		.name = _name,\
-		.nodes = (const SCPI_Node_t*[]){__VA_ARGS__},\
-		.node_count = (sizeof((const void*[]){__VA_ARGS__})/sizeof(const void*)),\
-	}
 
 #endif // SCPI_H
