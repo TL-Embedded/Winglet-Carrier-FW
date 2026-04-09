@@ -14,20 +14,32 @@
 
 
 #define DETECT_STRING_MAX		32
+#define BAUD_DEFAULT			115200
+
 
 static struct {
 	bool pwr_en;
 	bool dtr;
 	bool reset;
 	bool wake;
-	bool uart_modem_en;
-	bool uart_aux_en;
+	struct {
+		bool enable;
+		uint32_t baud;
+		bool swap;
+	} uart[2];
 } gIO;
 
 
-bool CMD_RST(SCPI_t * scpi, SCPI_Arg_t * args)
+static void MAIN_ResetConfig(void)
 {
 	bzero(&gIO, sizeof(gIO));
+	gIO.uart[0].baud = BAUD_DEFAULT;
+	gIO.uart[1].baud = BAUD_DEFAULT;
+}
+
+bool CMD_RST(SCPI_t * scpi, SCPI_Arg_t * args)
+{
+	MAIN_ResetConfig();
 	GPIO_Write(MODEM_PWR_EN, GPIO_PIN_RESET);
 	GPIO_Write(MODEM_RESET, GPIO_PIN_RESET);
 	GPIO_Write(MODEM_WAKE, GPIO_PIN_RESET);
@@ -39,7 +51,7 @@ bool CMD_RST(SCPI_t * scpi, SCPI_Arg_t * args)
 
 bool CMD_IDN(SCPI_t * scpi, SCPI_Arg_t * args)
 {
-	SCPI_Reply_Printf(scpi, "TL-Embedded, Winglet-Carrier, 0, v1.1\r\n");
+	SCPI_Reply_Printf(scpi, "TL-Embedded, Winglet-Carrier, 0, v1.2\r\n");
 	return true;
 }
 
@@ -105,7 +117,7 @@ bool CMD_UARTX(SCPI_t * scpi, SCPI_Arg_t * args, UART_t * uart, bool * state)
 			return false;
 		}
 
-		UART_Init(uart, baud, UART_Mode_Default);
+		UART_Init(uart, baud, UART_Mode_Swap);
 		*state = true;
 	}
 	else
@@ -116,14 +128,67 @@ bool CMD_UARTX(SCPI_t * scpi, SCPI_Arg_t * args, UART_t * uart, bool * state)
 	return true;
 }
 
-bool CMD_UART_Modem(SCPI_t * scpi, SCPI_Arg_t * args)
+void CMD_UART_Configure(uint8_t n)
 {
-	return CMD_UARTX(scpi, args, MODEM_UART, &gIO.uart_modem_en);
+	UART_t * uart = n == 0 ? MODEM_UART : AUX_UART;
+	if (gIO.uart[n].enable)
+		UART_Init(uart, gIO.uart[n].baud, gIO.uart[n].swap ? UART_Mode_Swap : 0);
+	else
+		UART_Deinit(uart);
 }
 
-bool CMD_UART_Aux(SCPI_t * scpi, SCPI_Arg_t * args)
+bool CMD_UART_Enable(SCPI_t * scpi, SCPI_Arg_t * args)
 {
-	return CMD_UARTX(scpi, args, AUX_UART, &gIO.uart_aux_en);
+	int32_t i = args[0].number - 1;
+	if (i < 0 || i > 1)
+		return false;
+
+	if (SCPI_IsQuery(scpi))
+	{
+		SCPI_Reply_Bool(scpi, gIO.uart[i].enable);
+		return true;
+	}
+
+	gIO.uart[i].enable = args[1].boolean;
+	CMD_UART_Configure(i);
+	return true;
+}
+
+bool CMD_UART_Baud(SCPI_t * scpi, SCPI_Arg_t * args)
+{
+	int32_t i = args[0].number - 1;
+	if (i < 0 || i > 1)
+		return false;
+
+	if (SCPI_IsQuery(scpi))
+	{
+		SCPI_Reply_Int(scpi, gIO.uart[i].baud);
+		return true;
+	}
+
+	if (args[1].number < 1200 || args[1].number > 1000000)
+		return false;
+
+	gIO.uart[i].baud = args[1].number;
+	CMD_UART_Configure(i);
+	return true;
+}
+
+bool CMD_UART_Swap(SCPI_t * scpi, SCPI_Arg_t * args)
+{
+	int32_t i = args[0].number - 1;
+	if (i < 0 || i > 1)
+		return false;
+
+	if (SCPI_IsQuery(scpi))
+	{
+		SCPI_Reply_Bool(scpi, gIO.uart[i].swap);
+		return true;
+	}
+
+	gIO.uart[i].swap = args[1].boolean;
+	CMD_UART_Configure(i);
+	return true;
 }
 
 bool CMD_PROM_Detect(SCPI_t * scpi, SCPI_Arg_t * args)
@@ -259,8 +324,9 @@ const SCPI_Node_t cNodes[] = {
 	{ .pattern = ":DCD?", .func = CMD_IO_DCD },
 	{ .pattern = ":RESet b", .func = CMD_IO_Reset },
 	{ .pattern = ":WAKE b", .func = CMD_IO_Wake },
-	{ .pattern = "UART:MODem b,?n", .func = CMD_UART_Modem },
-	{ .pattern = ":AUX b,?n", .func = CMD_UART_Aux },
+	{ .pattern = "UART#:EN b", .func = CMD_UART_Enable },
+	{ .pattern = ":BAUD n", .func = CMD_UART_Baud },
+	{ .pattern = ":SWAP b", .func = CMD_UART_Swap },
 	{ .pattern = "PROM?", .func = CMD_PROM_Detect },
 	{ .pattern = ":READ?", .func = CMD_PROM_Read },
 	{ .pattern = ":WRITE! s", .func = CMD_PROM_Write },
@@ -280,6 +346,8 @@ int main(void)
 	Console_Init();
 	LED_Init();
 
+	MAIN_ResetConfig();
+
 	GPIO_EnableOutput(MODEM_PWR_EN, GPIO_PIN_RESET);
 	GPIO_EnableOutput(MODEM_RESET, GPIO_PIN_RESET);
 	GPIO_EnableOutput(MODEM_WAKE, GPIO_PIN_RESET);
@@ -298,14 +366,14 @@ int main(void)
 		LED_Write(LED_Color_Green);
 
 		read = USB_CDCX_Read(1, bfr, sizeof(bfr));
-		if (gIO.uart_modem_en)
+		if (gIO.uart[0].enable)
 		{
 			UART_Write(MODEM_UART, bfr, read);
 			USB_CDCX_Write(1, bfr, UART_Read(MODEM_UART, bfr, sizeof(bfr)));
 		}
 
 		read = USB_CDCX_Read(2, bfr, sizeof(bfr));
-		if (gIO.uart_aux_en)
+		if (gIO.uart[1].enable)
 		{
 			UART_Write(AUX_UART, bfr, read);
 			USB_CDCX_Write(2, bfr, UART_Read(AUX_UART, bfr, sizeof(bfr)));
